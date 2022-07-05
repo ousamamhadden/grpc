@@ -94,7 +94,7 @@ defmodule GRPC.Stub do
             )
           end
 
-          def unquote(String.to_atom(func_name))(channelsAndRequests, opts \\ []) do
+          def unquote(String.to_atom(func_name <> "_multi"))(channelsAndRequests, opts \\ []) do
             GRPC.Stub.call(
               unquote(service_mod),
               unquote(Macro.escape(rpc)),
@@ -259,7 +259,7 @@ defmodule GRPC.Stub do
       end)
     end)
     |> Enum.map(fn pid ->
-      Task.await(pid, Keyword.get(new_opts, :timeout + 500, @default_timeout + 500))
+      Task.await(pid, Keyword.get(new_opts, :timeout, @default_timeout) + 500)
     end)
   end
 
