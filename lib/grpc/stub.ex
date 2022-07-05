@@ -93,6 +93,16 @@ defmodule GRPC.Stub do
               opts
             )
           end
+
+          def unquote(String.to_atom(func_name))(channelsAndRequests, opts \\ []) do
+            GRPC.Stub.call(
+              unquote(service_mod),
+              unquote(Macro.escape(rpc)),
+              # %{unquote(Macro.escape(stream)) | channel: channel},
+              channelsAndRequests,
+              opts ++ [grpc_stream: unquote(Macro.escape(stream))]
+            )
+          end
         end
       end)
     end
@@ -236,17 +246,21 @@ defmodule GRPC.Stub do
   """
   # Multicall equivalent
   def call(service_mod, rpc, channelsAndRequests, opts) do
+    {stream, new_opts} = Keyword.pop(opts, :grpc_stream)
+
     channelsAndRequests
     |> Enum.map(fn {channel, request} ->
       Task.async(fn ->
         try do
-          call(service_mod, rpc, channel, request, opts)
+          call(service_mod, rpc, %{stream | channel: channel}, request, new_opts)
         rescue
           error -> {:error, error}
         end
       end)
     end)
-    |> Enum.map(fn pid -> Task.await(pid, Keyword.get(opts, :timeout, @default_timeout + 500)) end)
+    |> Enum.map(fn pid ->
+      Task.await(pid, Keyword.get(new_opts, :timeout + 500, @default_timeout + 500))
+    end)
   end
 
   # this one is with retries
