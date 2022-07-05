@@ -234,8 +234,53 @@ defmodule GRPC.Stub do
       with the last elem being a map of headers `%{headers: headers, trailers: trailers}`(unary) or
       `%{headers: headers}`(server streaming)
   """
+  # Multicall equivalent
+  def call(service_mod, rpc, channelsAndRequests, opts) do
+    channelsAndRequests
+    |> Enum.map(fn {channel, request} ->
+      Task.async(fn ->
+        try do
+          call(service_mod, rpc, channel, request, opts)
+        rescue
+          error -> {:error, error}
+        end
+      end)
+    end)
+    |> Enum.map(fn pid -> Task.await(pid, Keyword.get(opts, :timeout, @default_timeout + 500)) end)
+  end
+
+  # this one is with retries
+
+  def call(service_mod, rpc, stream, request, opts) do
+    retries = Keyword.get(opts, :grpc_retries, 1)
+
+    case call_attempt(service_mod, rpc, stream, request, opts) do
+      {:error, error} ->
+        if retries == 1 do
+          {:error, error}
+        else
+          call(
+            service_mod,
+            rpc,
+            stream,
+            request,
+            Keyword.put(opts, :grpc_retries, retries - 1)
+          )
+        end
+
+      {:ok, reply, headers} ->
+        {:ok, reply, headers}
+
+      {:ok, reply} ->
+        {:ok, reply}
+
+      anythingelse ->
+        anythingelse
+    end
+  end
+
   @spec call(atom, tuple, GRPC.Client.Stream.t(), struct | nil, keyword) :: rpc_return
-  def call(_service_mod, rpc, %{channel: channel} = stream, request, opts) do
+  def call_attempt(_service_mod, rpc, %{channel: channel} = stream, request, opts) do
     {_, {req_mod, req_stream}, {res_mod, response_stream}} = rpc
 
     stream = %{stream | request_mod: req_mod, response_mod: res_mod}
