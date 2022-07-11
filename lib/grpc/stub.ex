@@ -259,7 +259,7 @@ defmodule GRPC.Stub do
       end)
     end)
     |> Enum.map(fn pid ->
-      Task.await(pid, Keyword.get(new_opts, :timeout, @default_timeout) + 500)
+      Task.await(pid, Keyword.get(new_opts, :timeout, @default_timeout) + 100)
     end)
   end
 
