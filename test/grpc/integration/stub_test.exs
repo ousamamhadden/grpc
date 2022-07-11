@@ -9,6 +9,26 @@ defmodule GRPC.Integration.StubTest do
     end
   end
 
+  defmodule HelloServer2 do
+    use GRPC.Server, service: Helloworld.Greeter.Service
+
+    def say_hello(req, _stream) do
+      Helloworld.HelloReply.new(message: "Hello, #{req.name}")
+    end
+  end
+
+  defmodule HelloFailingServer do
+    use GRPC.Server, service: Helloworld.Greeter.Service
+
+    def say_hello(req, _stream) do
+      if :rand.uniform() > 0.9 do
+        Helloworld.HelloReply.new(message: "Hello, #{req.name}")
+      else
+        500 / 0
+      end
+    end
+  end
+
   defmodule SlowServer do
     use GRPC.Server, service: Helloworld.Greeter.Service
 
@@ -76,6 +96,33 @@ defmodule GRPC.Integration.StubTest do
                 message: "Deadline expired",
                 status: GRPC.Status.deadline_exceeded()
               }} == channel |> Helloworld.Greeter.Stub.say_hello(req, timeout: 500)
+    end)
+  end
+
+  test "retries" do
+    run_server(HelloFailingServer, fn port ->
+      {:ok, channel} = GRPC.Stub.connect("localhost:#{port}")
+      req = Helloworld.HelloRequest.new(name: "Elixir")
+
+      {:ok, %Helloworld.HelloReply{message: "Hello, Elixir"}} ==
+        channel |> Helloworld.Greeter.Stub.say_hello(req, timeout: 500, grpc_retries: 100)
+    end)
+  end
+
+  test "multi call" do
+    run_server(HelloServer, fn port1 ->
+      run_server(HelloServer2, fn port2 ->
+        {:ok, channel1} = GRPC.Stub.connect("localhost:#{port1}")
+        {:ok, channel2} = GRPC.Stub.connect("localhost:#{port2}")
+        req = Helloworld.HelloRequest.new(name: "Elixir")
+        channelsandrequests = [{channel1, req}, {channel2, req}]
+
+        [
+          {:ok, %Helloworld.HelloReply{message: "Hello, Elixir"}},
+          {:ok, %Helloworld.HelloReply{message: "Hello, Elixir"}}
+        ] ==
+          channelsandrequests |> Helloworld.Greeter.Stub.say_hello_multi()
+      end)
     end)
   end
 end
